@@ -1,0 +1,26 @@
+# ezcp-agent task. The statement goes in statement.md.
+# Everything here is optional: leave a field out to let the model decide. Subtasks count from 0.
+
+[solution]
+# idea = "prefix sums"           # hint for the generated official solution
+# source = "solution.cpp"        # your official C++ solution; skips generating one
+attempts = 2                     # independently generated official solutions, cross-checked
+brute_force = true               # independent slow solution, checked against the official one on small subtasks
+
+# [[subtasks]]
+# points = 30
+# constraints = "n <= 1000"
+
+[partial]
+# extra = 4                      # wrong solutions the model adds to the ideas below
+# [[partial.ideas]]
+# idea = "greedy by smallest a_i"
+# passes = [0]                   # subtasks it should pass
+
+[limits]
+# time_ms = 1000                 # overrides the statement
+# memory_mb = 256
+
+[budget]
+max_calls = 40
+max_fix_rounds = 3
