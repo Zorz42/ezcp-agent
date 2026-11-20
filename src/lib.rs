@@ -24,6 +24,11 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// FNV-1a: stable across Rust releases, unlike `DefaultHasher`.
+fn hash(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+}
+
 fn read(path: &Path) -> Result<String> {
     std::fs::read_to_string(path).map_err(|source| Error::Io { path: path.to_owned(), source })
 }

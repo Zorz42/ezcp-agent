@@ -5,7 +5,6 @@
 # idea = "prefix sums"           # hint for the generated official solution
 # source = "solution.cpp"        # your official C++ solution; skips generating one
 attempts = 2                     # independently generated official solutions, cross-checked
-brute_force = true               # independent slow solution, checked against the official one on small subtasks
 
 # [[subtasks]]
 # points = 30
@@ -20,7 +19,3 @@ brute_force = true               # independent slow solution, checked against th
 [limits]
 # time_ms = 1000                 # overrides the statement
 # memory_mb = 256
-
-[budget]
-max_calls = 40
-max_fix_rounds = 3

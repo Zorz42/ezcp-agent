@@ -17,7 +17,6 @@ pub struct Config {
     pub subtasks: Vec<Subtask>,
     pub partial: Partial,
     pub limits: Limits,
-    pub budget: Budget,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,12 +26,11 @@ pub struct Solution {
     /// Relative to the task directory.
     pub source: Option<PathBuf>,
     pub attempts: u32,
-    pub brute_force: bool,
 }
 
 impl Default for Solution {
     fn default() -> Self {
-        Self { idea: None, source: None, attempts: 2, brute_force: true }
+        Self { idea: None, source: None, attempts: 2 }
     }
 }
 
@@ -63,19 +61,6 @@ pub struct PartialIdea {
 pub struct Limits {
     pub time_ms: Option<u32>,
     pub memory_mb: Option<u32>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Budget {
-    pub max_calls: u32,
-    pub max_fix_rounds: u32,
-}
-
-impl Default for Budget {
-    fn default() -> Self {
-        Self { max_calls: 40, max_fix_rounds: 3 }
-    }
 }
 
 #[derive(Debug, Clone)]

@@ -34,18 +34,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _cargo = Cargo::new()?;
 
     let spec_path = dir.join(spec::FILE);
-    let _spec = if spec_path.exists() {
-        Spec::load(&spec_path)?
+    let _spec = if let Some(spec) = Spec::load(&spec_path, &task)? {
+        spec
     } else {
-        println!("Writing {}...", spec::FILE);
+        let verb = if spec_path.exists() { "Regenerating" } else { "Writing" };
+        println!("{verb} {}...", spec::FILE);
         let (spec, stats) = Spec::generate(&claude, &task)?;
-        spec.save(&spec_path)?;
-        println!("{} output tokens, ~${:.2}", stats.usage.output_tokens, stats.cost_usd);
+        spec.save(&spec_path, &task)?;
+        if stats.cached {
+            println!("from cache");
+        } else {
+            println!("{} output tokens, ~${:.2}", stats.usage.output_tokens, stats.cost_usd);
+        }
         spec
     };
 
     if !confirm(&format!("Review {}. Continue?", spec_path.display()))? {
-        println!("Edit {} and rerun, or delete it to regenerate.", spec::FILE);
+        println!("Edit {} or the task and rerun.", spec::FILE);
         return Ok(());
     }
 

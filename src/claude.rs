@@ -82,8 +82,6 @@ pub struct Request {
     pub system: Option<String>,
     pub model: Option<Model>,
     pub effort: Option<Effort>,
-    /// Not part of the cache key.
-    pub max_budget_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -127,12 +125,8 @@ struct Cache {
 
 impl Cache {
     fn path(&self, key: &Value) -> PathBuf {
-        // FNV-1a: stable across Rust releases, unlike `DefaultHasher`. Collisions are caught by the stored key.
-        let hash = key
-            .to_string()
-            .bytes()
-            .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
-        self.dir.join(format!("{hash:016x}.json"))
+        // Collisions are caught by the key stored in the file.
+        self.dir.join(format!("{:016x}.json", crate::hash(&key.to_string())))
     }
 
     fn get(&self, key: &Value) -> Result<Option<Reply>> {
@@ -301,9 +295,6 @@ impl Claude {
         }
         if let Some(schema) = schema {
             cmd.args(["--json-schema", schema]);
-        }
-        if let Some(budget) = request.max_budget_usd {
-            cmd.args(["--max-budget-usd", &budget.to_string()]);
         }
 
         let mut child = cmd.spawn()?;
