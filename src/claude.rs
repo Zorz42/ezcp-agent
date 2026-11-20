@@ -25,8 +25,6 @@ pub enum Error {
     NoStructuredOutput,
     #[error("claude is not logged in with a claude.ai subscription (auth: {0}); run `claude auth login`")]
     NotSubscription(String),
-    #[error("no cached reply at {0} (replay mode)")]
-    CacheMiss(PathBuf),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -109,14 +107,6 @@ pub struct Stats {
     pub cached: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CacheMode {
-    /// Serve hits; call and store on a miss.
-    Record,
-    /// Serve hits; fail with [`Error::CacheMiss`] on a miss.
-    Replay,
-}
-
 #[derive(Serialize, Deserialize)]
 struct Reply {
     text: String,
@@ -133,7 +123,6 @@ struct Entry {
 #[derive(Debug, Clone)]
 struct Cache {
     dir: PathBuf,
-    mode: CacheMode,
 }
 
 impl Cache {
@@ -237,10 +226,10 @@ impl Claude {
         Ok(Self { bin, version, cache: None })
     }
 
-    /// Caches successful replies in `dir`, one JSON file per distinct request.
+    /// Serves repeated requests from `dir`; successful replies are stored one JSON file per request.
     #[must_use]
-    pub fn with_cache(mut self, dir: impl Into<PathBuf>, mode: CacheMode) -> Self {
-        self.cache = Some(Cache { dir: dir.into(), mode });
+    pub fn with_cache(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.cache = Some(Cache { dir: dir.into() });
         self
     }
 
@@ -284,9 +273,6 @@ impl Claude {
         });
         if let Some(reply) = cache.get(&key)? {
             return Ok(reply);
-        }
-        if cache.mode == CacheMode::Replay {
-            return Err(Error::CacheMiss(cache.path(&key)));
         }
         let reply = self.invoke(request, prompt, schema)?;
         cache.put(&key, &reply)?;
