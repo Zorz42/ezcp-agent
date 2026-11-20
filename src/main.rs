@@ -1,8 +1,10 @@
 use ezcp_agent::cargo::Cargo;
-use ezcp_agent::claude::Claude;
+use ezcp_agent::claude::{Claude, Stats};
 use ezcp_agent::spec::{self, Spec};
+use ezcp_agent::statement;
 use ezcp_agent::task::{self, Task};
 use std::io::{self, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
 /// Runs in the current directory: `ezcp-agent`.
@@ -24,7 +26,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if !dir.join(task::CONFIG_FILE).exists() {
         if confirm(&format!("{} is not an ezcp-agent project. Initialize it?", dir.display()))? {
             Task::init(&dir)?;
-            println!("Fill in {} and {}, then rerun.", task::STATEMENT_FILE, task::CONFIG_FILE);
+            println!("Fill in the description in {}, then rerun.", task::CONFIG_FILE);
         }
         return Ok(());
     }
@@ -34,29 +36,57 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Checked before any tokens are spent.
     let _cargo = Cargo::new()?;
 
+    let statement_path = dir.join(statement::FILE);
+    let statement = if let Some(statement) = statement::load(&statement_path, &task)? {
+        statement
+    } else {
+        announce(&statement_path);
+        let (statement, stats) = statement::generate(&claude, &task)?;
+        statement::save(&statement_path, &task, &statement)?;
+        report(&stats);
+        statement
+    };
+    if !review(statement::FILE)? {
+        return Ok(());
+    }
+
     let spec_path = dir.join(spec::FILE);
-    let _spec = if let Some(spec) = Spec::load(&spec_path, &task)? {
+    let _spec = if let Some(spec) = Spec::load(&spec_path, &task, &statement)? {
         spec
     } else {
-        let verb = if spec_path.exists() { "Regenerating" } else { "Writing" };
-        println!("{verb} {}...", spec::FILE);
-        let (spec, stats) = Spec::generate(&claude, &task)?;
-        spec.save(&spec_path, &task)?;
-        if stats.cached {
-            println!("from cache");
-        } else {
-            println!("{} output tokens, ~${:.2}", stats.usage.output_tokens, stats.cost_usd);
-        }
+        announce(&spec_path);
+        let (spec, stats) = Spec::generate(&claude, &task, &statement)?;
+        spec.save(&spec_path, &task, &statement)?;
+        report(&stats);
         spec
     };
-
-    if !confirm(&format!("Review {}. Continue?", spec::FILE))? {
-        println!("Edit {} or the task and rerun.", spec::FILE);
+    if !review(spec::FILE)? {
         return Ok(());
     }
 
     println!("Nothing more is implemented yet.");
     Ok(())
+}
+
+fn announce(path: &Path) {
+    let verb = if path.exists() { "Regenerating" } else { "Writing" };
+    println!("{verb} {}...", path.file_name().unwrap_or_default().display());
+}
+
+fn report(stats: &Stats) {
+    if stats.cached {
+        println!("from cache");
+    } else {
+        println!("{} output tokens, ~${:.2}", stats.usage.output_tokens, stats.cost_usd);
+    }
+}
+
+fn review(file: &str) -> io::Result<bool> {
+    let ok = confirm(&format!("Review {file}. Continue?"))?;
+    if !ok {
+        println!("Edit {file} or {} and rerun.", task::CONFIG_FILE);
+    }
+    Ok(ok)
 }
 
 /// `false` on end of input.

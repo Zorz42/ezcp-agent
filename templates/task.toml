@@ -1,14 +1,25 @@
-# ezcp-agent task. The statement goes in statement.md.
-# Everything here is optional: leave a field out to let the model decide. Subtasks count from 0.
+# ezcp-agent project. Only the description is required: leave any other field out to let the model decide.
+# Subtasks count from 0.
+
+# A few sentences: what is given, what is asked, rough constraints. The statement is written from this.
+description = """
+"""
 
 [solution]
-# idea = "prefix sums"           # hint for the generated official solution
+# idea = "prefix sums"           # hint for the generated official solution; never shown in the statement
 # source = "solution.cpp"        # your official C++ solution; skips generating one
 attempts = 2                     # independently generated official solutions, cross-checked
 
 # [[subtasks]]
 # points = 30
 # constraints = "n <= 1000"
+
+# [[samples]]                    # if given, the statement uses exactly these
+# input = """
+# 3
+# 1 2 3
+# """
+# output = "6"
 
 [partial]
 # extra = 4                      # wrong solutions the model adds to the ideas below

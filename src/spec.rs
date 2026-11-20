@@ -61,31 +61,29 @@ pub struct Partial {
 }
 
 /// Everything the spec is generated from.
-fn input(task: &Task) -> serde_json::Value {
+fn input(task: &Task, statement: &str) -> serde_json::Value {
     let config = &task.config;
     serde_json::json!({
-        "statement": task.statement,
-        "subtasks": config.subtasks,
+        "statement": statement,
         "solution_idea": config.solution.idea,
         "wrong_approaches": config.partial.ideas,
         "extra": config.partial.extra,
-        "limits": config.limits,
     })
 }
 
 /// First line of `spec.toml`; ties it to the inputs it was generated from.
-fn header(task: &Task) -> String {
+fn header(task: &Task, statement: &str) -> String {
     format!(
         "# Generated from {:016x}; regenerated when task.toml or statement.md change.\n",
-        hash(&input(task).to_string())
+        hash(&input(task, statement).to_string())
     )
 }
 
 impl Spec {
     /// One Claude call; the author's limits and subtask points are enforced afterwards.
-    pub fn generate(claude: &Claude, task: &Task) -> Result<(Self, Stats)> {
+    pub fn generate(claude: &Claude, task: &Task, statement: &str) -> Result<(Self, Stats)> {
         let config = &task.config;
-        let input = input(task);
+        let input = input(task, statement);
         let request = Request {
             prompt: PROMPT.to_owned(),
             model: Some(Model::Opus),
@@ -111,14 +109,14 @@ impl Spec {
         Ok((spec, stats))
     }
 
-    /// `None` if the file is missing or was generated from other inputs than `task`'s.
+    /// `None` if the file is missing or was generated from other inputs.
     /// Edits below the header are kept.
-    pub fn load(path: &Path, task: &Task) -> Result<Option<Self>> {
+    pub fn load(path: &Path, task: &Task, statement: &str) -> Result<Option<Self>> {
         let text = match fs::read_to_string(path) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             result => result.map_err(|source| Error::Io { path: path.to_owned(), source })?,
         };
-        if !text.starts_with(&header(task)) {
+        if !text.starts_with(&header(task, statement)) {
             return Ok(None);
         }
         let spec: Self = toml::from_str(&text).map_err(|source| Error::Toml { path: path.to_owned(), source })?;
@@ -126,8 +124,8 @@ impl Spec {
         Ok(Some(spec))
     }
 
-    pub fn save(&self, path: &Path, task: &Task) -> Result<()> {
-        let text = header(task) + &toml::to_string(self)?;
+    pub fn save(&self, path: &Path, task: &Task, statement: &str) -> Result<()> {
+        let text = header(task, statement) + &toml::to_string(self)?;
         fs::write(path, text).map_err(|source| Error::Io { path: path.to_owned(), source })
     }
 

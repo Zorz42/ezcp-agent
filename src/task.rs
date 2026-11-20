@@ -1,4 +1,4 @@
-//! A task directory: `task.toml` (settings) and `statement.md`.
+//! A project directory and its `task.toml`.
 
 use crate::{Error, Result, read};
 use serde::{Deserialize, Serialize};
@@ -6,15 +6,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const CONFIG_FILE: &str = "task.toml";
-pub const STATEMENT_FILE: &str = "statement.md";
 const STARTER: &str = include_str!("../templates/task.toml");
 
-/// `task.toml`. Every field is optional.
+/// `task.toml`. Every field but `description` is optional.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    pub description: String,
     pub solution: Solution,
     pub subtasks: Vec<Subtask>,
+    /// If non-empty, the statement uses exactly these.
+    pub samples: Vec<Sample>,
     pub partial: Partial,
     pub limits: Limits,
 }
@@ -39,6 +41,13 @@ impl Default for Solution {
 pub struct Subtask {
     pub points: u32,
     pub constraints: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sample {
+    pub input: String,
+    pub output: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -67,29 +76,22 @@ pub struct Limits {
 pub struct Task {
     pub dir: PathBuf,
     pub config: Config,
-    pub statement: String,
 }
 
 impl Task {
-    /// Writes a commented starter `task.toml` and an empty `statement.md`; existing files are kept.
+    /// Writes a commented starter `task.toml`.
     pub fn init(dir: &Path) -> Result<()> {
-        for (name, contents) in [(CONFIG_FILE, STARTER), (STATEMENT_FILE, "")] {
-            let path = dir.join(name);
-            if !path.exists() {
-                fs::write(&path, contents).map_err(|source| Error::Io { path, source })?;
-            }
-        }
-        Ok(())
+        let path = dir.join(CONFIG_FILE);
+        fs::write(&path, STARTER).map_err(|source| Error::Io { path, source })
     }
 
     pub fn load(dir: &Path) -> Result<Self> {
         let path = dir.join(CONFIG_FILE);
-        let config = toml::from_str(&read(&path)?).map_err(|source| Error::Toml { path, source })?;
-        let statement = read(&dir.join(STATEMENT_FILE))?;
-        if statement.trim().is_empty() {
-            return Err(Error::Invalid(format!("{STATEMENT_FILE} is empty")));
+        let config: Config = toml::from_str(&read(&path)?).map_err(|source| Error::Toml { path, source })?;
+        if config.description.trim().is_empty() {
+            return Err(Error::Invalid(format!("the description in {CONFIG_FILE} is empty")));
         }
-        Ok(Self { dir: dir.to_owned(), config, statement })
+        Ok(Self { dir: dir.to_owned(), config })
     }
 }
 
