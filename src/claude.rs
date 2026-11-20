@@ -31,17 +31,59 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Latest model of each family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Model {
+    Fable,
+    Opus,
+    Sonnet,
+    Haiku,
+}
+
+impl Model {
+    /// The CLI alias.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fable => "fable",
+            Self::Opus => "opus",
+            Self::Sonnet => "sonnet",
+            Self::Haiku => "haiku",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effort {
+    Low,
+    Medium,
+    High,
+    XHigh,
+    Max,
+}
+
+impl Effort {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
+
 /// Call settings. Unset fields fall back to the CLI's defaults.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Request<'a> {
+#[derive(Debug, Default, Clone)]
+pub struct Request {
     /// The instruction; [`Claude::ask_json`] appends its input after it.
-    pub prompt: &'a str,
+    pub prompt: String,
     /// Replaces Claude Code's default system prompt entirely.
-    pub system: Option<&'a str>,
-    /// Alias (`opus`, `sonnet`, `haiku`) or full model id.
-    pub model: Option<&'a str>,
-    /// `low` | `medium` | `high` | `xhigh` | `max`.
-    pub effort: Option<&'a str>,
+    pub system: Option<String>,
+    pub model: Option<Model>,
+    pub effort: Option<Effort>,
     /// Not part of the cache key.
     pub max_budget_usd: Option<f64>,
 }
@@ -73,15 +115,6 @@ pub enum CacheMode {
     Record,
     /// Serve hits; fail with [`Error::CacheMiss`] on a miss.
     Replay,
-}
-
-#[derive(Serialize)]
-struct Key<'a> {
-    model: Option<&'a str>,
-    effort: Option<&'a str>,
-    system: Option<&'a str>,
-    schema: Option<&'a str>,
-    prompt: &'a str,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -218,7 +251,7 @@ impl Claude {
 
     /// Plain text in, plain text out.
     pub fn ask(&self, request: &Request) -> Result<(String, Stats)> {
-        let reply = self.call(request, request.prompt, None)?;
+        let reply = self.call(request, &request.prompt, None)?;
         Ok((reply.text, reply.stats))
     }
 
@@ -242,13 +275,13 @@ impl Claude {
         let Some(cache) = &self.cache else {
             return self.invoke(request, prompt, schema);
         };
-        let key = serde_json::to_value(Key {
-            model: request.model,
-            effort: request.effort,
-            system: request.system,
-            schema,
-            prompt,
-        })?;
+        let key = serde_json::json!({
+            "model": request.model.map(Model::as_str),
+            "effort": request.effort.map(Effort::as_str),
+            "system": request.system,
+            "schema": schema,
+            "prompt": prompt,
+        });
         if let Some(reply) = cache.get(&key)? {
             return Ok(reply);
         }
@@ -271,14 +304,14 @@ impl Claude {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some(system) = request.system {
+        if let Some(system) = &request.system {
             cmd.args(["--system-prompt", system]);
         }
         if let Some(model) = request.model {
-            cmd.args(["--model", model]);
+            cmd.args(["--model", model.as_str()]);
         }
         if let Some(effort) = request.effort {
-            cmd.args(["--effort", effort]);
+            cmd.args(["--effort", effort.as_str()]);
         }
         if let Some(schema) = schema {
             cmd.args(["--json-schema", schema]);
