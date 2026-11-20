@@ -2,11 +2,10 @@
 
 use crate::claude::{Claude, Effort, Model, Request, Stats};
 use crate::task::Task;
-use crate::{Error, Result, hash};
+use crate::{Error, Result};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::fs;
-use std::io;
 use std::path::Path;
 
 pub const FILE: &str = "statement.md";
@@ -30,14 +29,6 @@ fn input(task: &Task) -> serde_json::Value {
     })
 }
 
-/// First line of `statement.md`; ties it to the inputs it was written from.
-fn header(task: &Task) -> String {
-    format!(
-        "<!-- Generated from {:016x}; regenerated when the description or settings in task.toml change. -->\n",
-        hash(&input(task).to_string())
-    )
-}
-
 pub fn generate(claude: &Claude, task: &Task) -> Result<(String, Stats)> {
     let request = Request {
         prompt: "Write the statement.".to_owned(),
@@ -49,16 +40,6 @@ pub fn generate(claude: &Claude, task: &Task) -> Result<(String, Stats)> {
     Ok((output.statement, stats))
 }
 
-/// The statement without its header; `None` if missing or written from other inputs than `task`'s.
-/// Edits below the header are kept.
-pub fn load(path: &Path, task: &Task) -> Result<Option<String>> {
-    let text = match fs::read_to_string(path) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        result => result.map_err(|source| Error::Io { path: path.to_owned(), source })?,
-    };
-    Ok(text.strip_prefix(&header(task)).map(str::to_owned))
-}
-
-pub fn save(path: &Path, task: &Task, statement: &str) -> Result<()> {
-    fs::write(path, header(task) + statement).map_err(|source| Error::Io { path: path.to_owned(), source })
+pub fn save(path: &Path, statement: &str) -> Result<()> {
+    fs::write(path, statement).map_err(|source| Error::Io { path: path.to_owned(), source })
 }

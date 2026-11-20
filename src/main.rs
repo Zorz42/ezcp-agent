@@ -4,7 +4,6 @@ use ezcp_agent::spec::{self, Spec};
 use ezcp_agent::statement;
 use ezcp_agent::task::{self, Task};
 use std::io::{self, Write};
-use std::path::Path;
 use std::process::ExitCode;
 
 /// Runs in the current directory: `ezcp-agent`.
@@ -37,40 +36,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _cargo = Cargo::new()?;
 
     let statement_path = dir.join(statement::FILE);
-    let statement = if let Some(statement) = statement::load(&statement_path, &task)? {
-        statement
-    } else {
-        announce(&statement_path);
-        let (statement, stats) = statement::generate(&claude, &task)?;
-        statement::save(&statement_path, &task, &statement)?;
-        report(&stats);
-        statement
-    };
+    // Regenerated on every run: unchanged inputs are served from the cache.
+    println!("Writing {}...", statement::FILE);
+    let (statement, stats) = statement::generate(&claude, &task)?;
+    statement::save(&statement_path, &statement)?;
+    report(&stats);
     if !review(statement::FILE)? {
         return Ok(());
     }
 
-    let spec_path = dir.join(spec::FILE);
-    let _spec = if let Some(spec) = Spec::load(&spec_path, &task, &statement)? {
-        spec
-    } else {
-        announce(&spec_path);
-        let (spec, stats) = Spec::generate(&claude, &task, &statement)?;
-        spec.save(&spec_path, &task, &statement)?;
-        report(&stats);
-        spec
-    };
+    println!("Writing {}...", spec::FILE);
+    let (spec, stats) = Spec::generate(&claude, &task, &statement)?;
+    spec.save(&dir.join(spec::FILE))?;
+    report(&stats);
     if !review(spec::FILE)? {
         return Ok(());
     }
 
     println!("Nothing more is implemented yet.");
     Ok(())
-}
-
-fn announce(path: &Path) {
-    let verb = if path.exists() { "Regenerating" } else { "Writing" };
-    println!("{verb} {}...", path.file_name().unwrap_or_default().display());
 }
 
 fn report(stats: &Stats) {
@@ -84,7 +68,7 @@ fn report(stats: &Stats) {
 fn review(file: &str) -> io::Result<bool> {
     let ok = confirm(&format!("Review {file}. Continue?"))?;
     if !ok {
-        println!("Edit {file} or {} and rerun.", task::CONFIG_FILE);
+        println!("Change {} and rerun.", task::CONFIG_FILE);
     }
     Ok(ok)
 }
