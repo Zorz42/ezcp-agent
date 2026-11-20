@@ -32,7 +32,7 @@ pub struct Solution {
 
 impl Default for Solution {
     fn default() -> Self {
-        Self { idea: None, source: None, attempts: 2 }
+        Self { idea: None, source: None, attempts: 10 }
     }
 }
 
@@ -100,6 +100,6 @@ mod tests {
     #[test]
     fn starter_parses() {
         let config: super::Config = toml::from_str(super::STARTER).unwrap();
-        assert_eq!(config.solution.attempts, 2);
+        assert_eq!(config.solution.attempts, 10);
     }
 }

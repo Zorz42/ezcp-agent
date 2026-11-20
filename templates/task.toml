@@ -8,7 +8,7 @@ description = """
 [solution]
 # idea = "prefix sums"           # hint for the generated official solution; never shown in the statement
 # source = "solution.cpp"        # your official C++ solution; skips generating one
-attempts = 2                     # independently generated official solutions, cross-checked
+attempts = 10                    # independently generated official solutions, cross-checked
 
 # [[subtasks]]
 # points = 30

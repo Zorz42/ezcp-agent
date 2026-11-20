@@ -1,5 +1,6 @@
 use ezcp_agent::cargo::Cargo;
 use ezcp_agent::claude::{Claude, Stats};
+use ezcp_agent::solution;
 use ezcp_agent::spec::{self, Spec};
 use ezcp_agent::statement;
 use ezcp_agent::task::{self, Task};
@@ -51,6 +52,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     report(&stats);
     if !review(spec::FILE)? {
         return Ok(());
+    }
+
+    if let Some(source) = &task.config.solution.source {
+        println!("Using {} as the official solution.", source.display());
+    } else {
+        let count = task.config.solution.attempts;
+        println!("Writing {count} solutions to {}...", solution::DIR);
+        let (sources, stats): (Vec<_>, Vec<_>) = solution::generate(&claude, &spec, count)?.into_iter().unzip();
+        solution::save(&dir.join(solution::DIR), &sources)?;
+        let cached = stats.iter().filter(|s| s.cached).count();
+        let cost: f64 = stats.iter().filter(|s| !s.cached).map(|s| s.cost_usd).sum();
+        println!("{cached} from cache, ~${cost:.2}");
     }
 
     println!("Nothing more is implemented yet.");

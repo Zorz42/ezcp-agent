@@ -1,5 +1,6 @@
 pub mod cargo;
 pub mod claude;
+pub mod solution;
 pub mod spec;
 pub mod statement;
 pub mod task;
