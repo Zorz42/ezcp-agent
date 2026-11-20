@@ -3,10 +3,9 @@ use ezcp_agent::claude::Claude;
 use ezcp_agent::spec::{self, Spec};
 use ezcp_agent::task::{self, Task};
 use std::io::{self, Write};
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-/// Usage: `ezcp-agent [task-dir]` (default: the current directory).
+/// Runs in the current directory: `ezcp-agent`.
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -17,11 +16,13 @@ fn main() -> ExitCode {
     }
 }
 
+const CACHE_FILE: &str = "prompt-cache.jsonl";
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let dir = std::env::args_os().nth(1).map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let dir = std::env::current_dir()?;
 
     if !dir.join(task::CONFIG_FILE).exists() {
-        if confirm(&format!("No {} in {}. Create one?", task::CONFIG_FILE, dir.display()))? {
+        if confirm(&format!("{} is not an ezcp-agent project. Initialize it?", dir.display()))? {
             Task::init(&dir)?;
             println!("Fill in {} and {}, then rerun.", task::STATEMENT_FILE, task::CONFIG_FILE);
         }
@@ -29,7 +30,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let task = Task::load(&dir)?;
-    let claude = Claude::new()?.with_cache(dir.join(".ezcp-agent/cache"));
+    let claude = Claude::new()?.with_cache(dir.join(CACHE_FILE))?;
     // Checked before any tokens are spent.
     let _cargo = Cargo::new()?;
 
@@ -49,7 +50,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         spec
     };
 
-    if !confirm(&format!("Review {}. Continue?", spec_path.display()))? {
+    if !confirm(&format!("Review {}. Continue?", spec::FILE))? {
         println!("Edit {} or the task and rerun.", spec::FILE);
         return Ok(());
     }

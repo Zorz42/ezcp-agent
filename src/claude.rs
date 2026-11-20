@@ -1,13 +1,15 @@
-//! One-shot, tool-less calls to the `claude` CLI in print mode, with an optional on-disk cache.
+//! One-shot, tool-less calls to the `claude` CLI in print mode, with an optional persistent cache.
 
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -105,7 +107,7 @@ pub struct Stats {
     pub cached: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Reply {
     text: String,
     structured: Option<Value>,
@@ -118,36 +120,44 @@ struct Entry {
     reply: Reply,
 }
 
-#[derive(Debug, Clone)]
+/// A JSON Lines file of entries, appended to and loaded whole.
 struct Cache {
-    dir: PathBuf,
+    path: PathBuf,
+    /// Keyed by the key's JSON text.
+    entries: HashMap<String, Reply>,
+    /// The file ends in a line cut short, which the next entry must not be appended to.
+    torn: bool,
 }
 
 impl Cache {
-    fn path(&self, key: &Value) -> PathBuf {
-        // Collisions are caught by the key stored in the file.
-        self.dir.join(format!("{:016x}.json", crate::hash(&key.to_string())))
-    }
-
-    fn get(&self, key: &Value) -> Result<Option<Reply>> {
-        let bytes = match fs::read(self.path(key)) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+    fn open(path: PathBuf) -> Result<Self> {
+        let text = match fs::read_to_string(&path) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
             result => result?,
         };
-        let entry: Entry = serde_json::from_slice(&bytes)?;
-        Ok((entry.key == *key).then(|| {
-            let mut reply = entry.reply;
-            reply.stats.cached = true;
-            reply
-        }))
+        // Skipping unparsable lines drops a last line cut short by a crash.
+        let entries = text
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Entry>(line).ok())
+            .map(|entry| (entry.key.to_string(), entry.reply))
+            .collect();
+        let torn = !text.is_empty() && !text.ends_with('\n');
+        Ok(Self { path, entries, torn })
     }
 
-    fn put(&self, key: &Value, reply: &Reply) -> Result<()> {
-        fs::create_dir_all(&self.dir)?;
-        let path = self.path(key);
-        let tmp = path.with_extension("tmp");
-        fs::write(&tmp, serde_json::to_vec_pretty(&serde_json::json!({ "key": key, "reply": reply }))?)?;
-        fs::rename(tmp, path)?;
+    fn get(&self, key: &Value) -> Option<Reply> {
+        let mut reply = self.entries.get(&key.to_string())?.clone();
+        reply.stats.cached = true;
+        Some(reply)
+    }
+
+    fn put(&mut self, key: &Value, reply: &Reply) -> Result<()> {
+        let mut line = if self.torn { "\n".to_owned() } else { String::new() };
+        line += &serde_json::to_string(&serde_json::json!({ "key": key, "reply": reply }))?;
+        line.push('\n');
+        fs::OpenOptions::new().create(true).append(true).open(&self.path)?.write_all(line.as_bytes())?;
+        self.torn = false;
+        self.entries.insert(key.to_string(), reply.clone());
         Ok(())
     }
 }
@@ -197,11 +207,10 @@ fn run(cmd: &mut Command) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-#[derive(Debug, Clone)]
 pub struct Claude {
     bin: PathBuf,
     version: String,
-    cache: Option<Cache>,
+    cache: Option<Mutex<Cache>>,
 }
 
 impl Claude {
@@ -220,11 +229,10 @@ impl Claude {
         Ok(Self { bin, version, cache: None })
     }
 
-    /// Serves repeated requests from `dir`; successful replies are stored one JSON file per request.
-    #[must_use]
-    pub fn with_cache(mut self, dir: impl Into<PathBuf>) -> Self {
-        self.cache = Some(Cache { dir: dir.into() });
-        self
+    /// Serves repeated requests from the file at `path`, which successful replies are appended to.
+    pub fn with_cache(mut self, path: impl Into<PathBuf>) -> Result<Self> {
+        self.cache = Some(Mutex::new(Cache::open(path.into())?));
+        Ok(self)
     }
 
     #[must_use]
@@ -265,11 +273,13 @@ impl Claude {
             "schema": schema,
             "prompt": prompt,
         });
-        if let Some(reply) = cache.get(&key)? {
+        // Not held during the call, so calls on several threads run in parallel.
+        let lock = || cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(reply) = lock().get(&key) {
             return Ok(reply);
         }
         let reply = self.invoke(request, prompt, schema)?;
-        cache.put(&key, &reply)?;
+        lock().put(&key, &reply)?;
         Ok(reply)
     }
 
