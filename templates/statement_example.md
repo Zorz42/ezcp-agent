@@ -1,21 +1,66 @@
-Dana sta seznama $a_1, a_2, \dots, a_n$ in $b_1, b_2, \dots, b_m$ ter celo število $k$.
+# Sum
 
-Iz njiju sestavimo seznam $c$ dolžine $n \cdot m$, ki vsebuje vsote $a_i + b_j$ za vse pare indeksov $i$ in $j$, kjer je $1 \le i \le n$ in $1 \le j \le m$. Vsak par $(i, j)$ prispeva svojo vsoto posebej, tudi kadar je ta enaka vsoti kakšnega drugega para.
+**Time limit:** 1 s · **Memory limit:** 256 MB
 
-Izpišite $k$ najmanjših vsot v seznamu $c$. Če se ista vrednost med njimi pojavi večkrat, jo izpišite tolikokrat, kolikorkrat se pojavi.
+You are given $n$ integers $a_1, a_2, \dots, a_n$. Print their sum.
 
-## Vhodni podatki
+## Input
 
-V prvih treh vrsticah so cela števila $n$, $m$ in $k$, vsako v svoji vrstici.
+The first line contains an integer $n$.
 
-V naslednjih $n$ vrsticah so cela števila $a_1, a_2, \dots, a_n$, vsako v svoji vrstici.
+The second line contains $n$ integers $a_1, a_2, \dots, a_n$, separated by spaces.
 
-V naslednjih $m$ vrsticah so cela števila $b_1, b_2, \dots, b_m$, vsako v svoji vrstici.
+## Output
 
-Velja $1 \le n \le 100\,000$, $1 \le m \le 100\,000$, $1 \le k \le \min(n \cdot m,\ 100\,000)$ in $1 \le a_i, b_j \le 10^9$.
+Print a single integer: $a_1 + a_2 + \dots + a_n$.
 
-## Izhodni podatki
+## Constraints
 
-Izpišite $k$ najmanjših vsot, urejenih naraščajoče, vsako v svoji vrstici.
+- $1 \le n \le 200\,000$
+- $-10^9 \le a_i \le 10^9$
 
-{{SAMPLES}}
+## Subtasks
+
+| Subtask | Points | Constraints |
+| --- | --- | --- |
+| 1 | 20 | $n \le 10$ |
+| 2 | 30 | $0 \le a_i \le 1\,000$ |
+| 3 | 50 | No additional constraints. |
+
+## Samples
+
+### Sample 1
+
+Input:
+
+```
+3
+1 2 3
+```
+
+Output:
+
+```
+6
+```
+
+### Sample 2
+
+Input:
+
+```
+4
+1000000000 1000000000 -5 1000000000
+```
+
+Output:
+
+```
+2999999995
+```
+
+## Notes
+
+In the first sample, $1 + 2 + 3 = 6$.
+
+In the second sample, the sum does not fit in a 32-bit integer.
