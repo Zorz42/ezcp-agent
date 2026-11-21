@@ -2,7 +2,6 @@ use ezcp_agent::cargo::Cargo;
 use ezcp_agent::claude::{Claude, Stats};
 use ezcp_agent::cpp::Compiler;
 use ezcp_agent::ladder::{self, Ladder};
-use ezcp_agent::spec::{self, Spec};
 use ezcp_agent::stress::{self, Candidate, Stress};
 use ezcp_agent::task::{self, Task};
 use ezcp_agent::{generator, read, solution, statement};
@@ -21,8 +20,10 @@ fn main() -> ExitCode {
     }
 }
 
+/// Everything but the results, for deeper inspection.
+const WORK_DIR: &str = "ezcp-agent";
 const CACHE_FILE: &str = "prompt-cache.jsonl";
-const OFFICIAL_FILE: &str = "solutions/official.cpp";
+const OFFICIAL_FILE: &str = "official.cpp";
 /// Generator sources tried before giving up on compiler errors.
 const GENERATOR_TRIES: usize = 3;
 
@@ -39,7 +40,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let task = Task::load(&dir)?;
     let config = &task.config;
-    let claude = Claude::new()?.with_cache(dir.join(CACHE_FILE))?;
+    let work = dir.join(WORK_DIR);
+    std::fs::create_dir_all(&work)?;
+    let claude = Claude::new()?.with_cache(work.join(CACHE_FILE))?;
     // Checked before any tokens are spent.
     let cargo = Cargo::new()?;
     let compiler = Compiler::new()?;
@@ -52,9 +55,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     report(&[stats]);
     let problem = statement::strip(&draft);
 
-    println!("Writing {}...", ladder::FILE);
+    println!("Planning the solutions...");
     let (ladder, stats) = Ladder::generate(&claude, &task, &problem)?;
-    ladder.save(&dir.join(ladder::FILE))?;
+    ladder.save(&work.join(ladder::FILE))?;
     report(&[stats]);
     if ladder.multiple_answers {
         return Err("the task has several correct answers, which needs a checker: not supported yet".into());
@@ -65,7 +68,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("Writing {attempts} solutions and {} slower ones...", ladder.full());
     let (mut solutions, stats) = solution::generate(&claude, &problem, config.solution.idea.as_deref(), &ladder, attempts)?;
     solutions.attempts.extend(own);
-    let (attempt_paths, rung_paths) = solutions.save(&dir.join(solution::DIR))?;
+    let (attempt_paths, rung_paths) = solutions.save(&work.join(solution::DIR))?;
     report(&stats);
 
     let candidates: Vec<_> = ladder
@@ -85,38 +88,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         rejected.push(compiler.errors(&candidate.source)?.map(|_| "does not compile".to_owned()));
     }
 
-    let stress = build_stress(&claude, &cargo, &dir, &problem, &ladder)?;
+    let stress = build_stress(&claude, &cargo, &work, &problem, &ladder)?;
     println!("Cross-checking the solutions...");
     let official = stress.check(&candidates, &mut rejected, |message| println!("  {message}"));
     for (candidate, reason) in candidates.iter().zip(&rejected) {
         println!("  {}: {}", candidate.name, reason.as_deref().unwrap_or("ok"));
     }
     let official = official?;
-    let official_path = dir.join(OFFICIAL_FILE);
-    std::fs::copy(&candidates[official].source, &official_path)?;
-    println!("{} is the official solution: {OFFICIAL_FILE}", candidates[official].name);
+    std::fs::copy(&candidates[official].source, work.join(solution::DIR).join(OFFICIAL_FILE))?;
+    println!("{} is the official solution.", candidates[official].name);
 
-    let subtasks = if config.subtasks.is_empty() {
+    if config.subtasks.is_empty() {
         let confirmed: Vec<_> = (0..ladder.rungs.len()).map(|tier| tier == ladder.full() || rejected[tier].is_none()).collect();
-        let subtasks = ladder.subtasks(&confirmed);
         println!("Writing the subtasks into {}...", statement::FILE);
-        let (statement, stats) = statement::fill(&claude, &draft, &subtasks)?;
+        let (statement, stats) = statement::fill(&claude, &draft, &ladder.subtasks(&confirmed))?;
         statement::save(&statement_path, &statement)?;
         report(&[stats]);
-        subtasks
-    } else {
-        config
-            .subtasks
-            .iter()
-            .map(|subtask| spec::Subtask { points: subtask.points, constraints: vec![subtask.constraints.clone()] })
-            .collect()
-    };
-
-    println!("Writing {}...", spec::FILE);
-    let statement = read(&statement_path)?;
-    let (spec, stats) = Spec::generate(&claude, &task, &statement, subtasks, &ladder)?;
-    spec.save(&dir.join(spec::FILE))?;
-    report(&[stats]);
+    }
 
     println!("Nothing more is implemented yet.");
     Ok(())

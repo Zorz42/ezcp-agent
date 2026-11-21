@@ -4,7 +4,6 @@ pub mod cpp;
 pub mod generator;
 pub mod ladder;
 pub mod solution;
-pub mod spec;
 pub mod statement;
 pub mod stress;
 pub mod task;

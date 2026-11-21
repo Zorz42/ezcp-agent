@@ -5,7 +5,6 @@
 //! Field docs double as instructions to the model: they end up in the JSON schema.
 
 use crate::claude::{Claude, Effort, Model, Request, Stats};
-use crate::spec::Subtask;
 use crate::task::Task;
 use crate::{Error, Result};
 use schemars::JsonSchema;
@@ -42,6 +41,13 @@ pub struct Rung {
     pub includes: Vec<usize>,
     /// Points of the subtask with these constraints.
     pub points: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Subtask {
+    pub points: u32,
+    /// Every constraint holding in it.
+    pub constraints: Vec<String>,
 }
 
 fn input(task: &Task, statement: &str) -> serde_json::Value {

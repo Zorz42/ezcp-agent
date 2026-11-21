@@ -2,7 +2,7 @@
 //! gave subtasks, it is first written without them, with [`PLACEHOLDER`] in their place.
 
 use crate::claude::{Claude, Effort, Model, Request, Stats};
-use crate::spec::Subtask;
+use crate::ladder::Subtask;
 use crate::task::Task;
 use crate::{Error, Result};
 use schemars::JsonSchema;
