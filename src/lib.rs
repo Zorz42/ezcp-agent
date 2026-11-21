@@ -1,6 +1,8 @@
 pub mod cargo;
 pub mod claude;
 pub mod cpp;
+pub mod edit;
+pub mod fix;
 pub mod generator;
 pub mod ladder;
 pub mod limits;

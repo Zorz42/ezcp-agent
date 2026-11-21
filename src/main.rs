@@ -1,6 +1,8 @@
 use ezcp_agent::cargo::Cargo;
 use ezcp_agent::claude::{Claude, Stats};
 use ezcp_agent::cpp::Compiler;
+use ezcp_agent::edit;
+use ezcp_agent::fix::{self, Language};
 use ezcp_agent::ladder::{self, Ladder};
 use ezcp_agent::project::{self, Kind, Outcome, Partial, Project};
 use ezcp_agent::stress::{self, Candidate, Stress};
@@ -29,7 +31,7 @@ const CACHE_FILE: &str = "prompt-cache.jsonl";
 /// Shared by the runner crates.
 const TARGET_DIR: &str = "target";
 const UNOPTIMIZED: &str = "unoptimized";
-/// Model-written Rust sources tried before giving up on their errors.
+/// Model-written Rust sources tried before giving up on their errors or panics.
 const TRIES: usize = 3;
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -87,7 +89,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let candidates = candidates(&ladder, rung_paths, attempt_paths);
     let sources: Vec<_> = candidates.iter().map(|candidate| candidate.source.clone()).collect();
-    let mut rejected: Vec<_> = compiles(&compiler, &sources)?.into_iter().map(|ok| (!ok).then(|| "does not compile".to_owned())).collect();
+    let mut rejected: Vec<_> = compile(&claude, &compiler, &sources)?.into_iter().map(|ok| (!ok).then(|| "does not compile".to_owned())).collect();
 
     let stress = build_stress(&claude, &cargo, &work, &problem, &ladder, &project.generator())?;
     println!("Cross-checking {} solutions...", candidates.len());
@@ -122,7 +124,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut solutions = assemble(&ladder, &confirmed, rung_sources, &project.subtasks, limits);
     let wrong = write_wrong(&claude, &statement, &official, &ladder, &project.subtasks, &solutions, config.tests.wrong)?;
     solutions.extend(wrong);
-    let targets = keep_compiling(&compiler, &mut project, &official, solutions)?;
+    let targets = keep_compiling(&claude, &compiler, &mut project, &official, solutions)?;
     let is_wrong = |partial: &&Partial| matches!(partial.kind, Kind::Wrong { .. });
     let wrong_written = project.partials.iter().filter(is_wrong).count();
 
@@ -223,7 +225,7 @@ fn write_wrong(claude: &Claude, statement: &str, official: &str, ladder: &Ladder
             let fails = base.passes.iter().copied().filter(|s| !passes.contains(s)).collect();
             let target = Target { description: mutant.mistake.clone(), edits: Some(serde_json::to_value(&mutant.edits)?), fails };
             let (name, file) = (format!("subtask {} mistake: {}", aim + 1, mutant.mistake), format!("wrong/{}-mistake-{:02}.cpp", aim + 1, i + 1));
-            add(name, file, aim, passes, mutant.apply(base.source), target);
+            add(name, file, aim, passes, edit::apply(base.source, &mutant.edits), target);
         }
     }
     for (i, (approach, source)) in approaches.iter().zip(sources).enumerate() {
@@ -239,14 +241,14 @@ fn write_wrong(claude: &Claude, statement: &str, official: &str, ladder: &Ladder
 
 /// Writes the solutions and keeps those that compile as the project's partial solutions. Returns
 /// their targets.
-fn keep_compiling(compiler: &Compiler, project: &mut Project, official: &str, solutions: Vec<Solution>) -> Result<Vec<Target>, Box<dyn std::error::Error>> {
+fn keep_compiling(claude: &Claude, compiler: &Compiler, project: &mut Project, official: &str, solutions: Vec<Solution>) -> Result<Vec<Target>, Box<dyn std::error::Error>> {
     project.partials = solutions.iter().map(|solution| solution.partial.clone()).collect();
     let sources: Vec<_> = solutions.iter().map(|solution| solution.source.clone()).collect();
     project.write_solutions(official, &sources)?;
     let paths: Vec<_> = project.partials.iter().map(|partial| project.solution(partial)).collect();
     let mut targets = Vec::new();
     project.partials.clear();
-    for ((solution, ok), path) in solutions.into_iter().zip(compiles(compiler, &paths)?).zip(&paths) {
+    for ((solution, ok), path) in solutions.into_iter().zip(compile(claude, compiler, &paths)?).zip(&paths) {
         if ok {
             targets.extend(solution.target);
             project.partials.push(solution.partial);
@@ -270,11 +272,11 @@ fn write_tests(claude: &Claude, cargo: &Cargo, work: &Path, dir: &Path, statemen
         report(&[stats]);
         runner::write(&project.tests(), &source)?;
         println!("Building {}...", project::CHECK_DIR);
-        let check = match project.build_check(cargo, &work.join(project::CHECK_DIR))? {
+        let (tests, check_dir) = (project.tests(), work.join(project::CHECK_DIR));
+        let check = match build_fixing(claude, &tests, &[("generator.rs", &generator)], || project.build_check(cargo, &check_dir))? {
             Ok(check) => check,
             Err(errors) => {
-                println!("It does not compile.");
-                previous = Some((source, errors));
+                previous = Some((read(&tests)?, errors));
                 continue;
             }
         };
@@ -299,19 +301,54 @@ fn build_stress(claude: &Claude, cargo: &Cargo, dir: &Path, statement: &str, lad
         report(&[stats]);
         runner::write(path, &source)?;
         println!("Building {}...", stress::DIR);
-        match Stress::build(cargo, &dir.join(stress::DIR), path, ladder)? {
+        match build_fixing(claude, path, &[], || Stress::build(cargo, &dir.join(stress::DIR), path, ladder))? {
             Ok(stress) => return Ok(stress),
-            Err(errors) => {
-                println!("It does not compile.");
-                previous = Some((source, errors));
-            }
+            Err(errors) => previous = Some((read(path)?, errors)),
         }
     }
     Err(format!("the generator still does not compile after {TRIES} tries").into())
 }
 
-/// Whether each source compiles, checked in parallel.
-fn compiles(compiler: &Compiler, paths: &[PathBuf]) -> Result<Vec<bool>, Box<dyn std::error::Error>> {
+/// Builds, fixing the Rust source `path` while it does not compile. `others` are the sources it is
+/// built with.
+fn build_fixing<T>(claude: &Claude, path: &Path, others: &[(&str, &str)], mut build: impl FnMut() -> ezcp_agent::Result<Result<T, String>>) -> Result<Result<T, String>, Box<dyn std::error::Error>> {
+    let errors = match build()? {
+        Ok(done) => return Ok(Ok(done)),
+        Err(errors) => errors,
+    };
+    println!("It does not compile. Fixing it...");
+    let (outcome, stats) = fix::compile(claude, Language::Rust, path, others, errors, build)?;
+    report(&stats);
+    if outcome.is_err() {
+        println!("It still does not compile.");
+    }
+    Ok(outcome)
+}
+
+/// Whether each C++ source compiles, after fixing those that do not, in parallel.
+fn compile(claude: &Claude, compiler: &Compiler, paths: &[PathBuf]) -> Result<Vec<bool>, Box<dyn std::error::Error>> {
+    let errors = compiles(compiler, paths)?;
+    let broken: Vec<_> = paths.iter().zip(errors).filter_map(|(path, errors)| Some((path, errors?))).collect();
+    if broken.is_empty() {
+        return Ok(vec![true; paths.len()]);
+    }
+    println!("Fixing {} sources that do not compile...", broken.len());
+    let results = std::thread::scope(|scope| {
+        let handles: Vec<_> = broken
+            .into_iter()
+            .map(|(path, errors)| {
+                let build = move || Ok(compiler.errors(path)?.map_or(Ok(()), Err));
+                scope.spawn(move || fix::compile(claude, Language::Cpp, path, &[], errors, build).map(|(outcome, stats)| (path, outcome.is_ok(), stats)))
+            })
+            .collect();
+        handles.into_iter().map(|handle| handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))).collect::<ezcp_agent::Result<Vec<_>>>()
+    })?;
+    report(&results.iter().flat_map(|(_, _, stats)| stats.iter().copied()).collect::<Vec<_>>());
+    Ok(paths.iter().map(|path| results.iter().all(|(broken, fixed, _)| *broken != path || *fixed)).collect())
+}
+
+/// Each source's compiler errors, `None` if it compiles, checked in parallel.
+fn compiles(compiler: &Compiler, paths: &[PathBuf]) -> Result<Vec<Option<String>>, Box<dyn std::error::Error>> {
     let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
     let mut results = Vec::new();
     for chunk in paths.chunks(threads) {
@@ -320,7 +357,7 @@ fn compiles(compiler: &Compiler, paths: &[PathBuf]) -> Result<Vec<bool>, Box<dyn
             handles.into_iter().map(|handle| handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))).collect::<Vec<_>>()
         });
         for errors in chunk {
-            results.push(errors?.is_none());
+            results.push(errors?);
         }
     }
     Ok(results)

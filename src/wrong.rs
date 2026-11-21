@@ -2,6 +2,7 @@
 //! subtask's solution, and the wrong approaches contestants are likely to try, written in full.
 
 use crate::claude::{Claude, Effort, Model, Request, Stats};
+use crate::edit::Edit;
 use crate::ladder::{Ladder, Subtask};
 use crate::Result;
 use schemars::JsonSchema;
@@ -34,28 +35,6 @@ pub struct Base<'a> {
     pub source: &'a str,
     /// The subtasks it solves.
     pub passes: &'a [usize],
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct Edit {
-    /// Exact text occurring once in the source.
-    pub find: String,
-    pub replace: String,
-}
-
-impl Wrong {
-    /// `None` if an edit's text does not occur exactly once.
-    #[must_use]
-    pub fn apply(&self, official: &str) -> Option<String> {
-        let mut source = official.to_owned();
-        for edit in &self.edits {
-            if source.matches(&edit.find).count() != 1 {
-                return None;
-            }
-            source = source.replacen(&edit.find, &edit.replace, 1);
-        }
-        Some(source)
-    }
 }
 
 /// `count` per base: sequential calls of up to [`BATCH`] for each, the bases in parallel.
