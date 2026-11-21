@@ -3,15 +3,12 @@
 
 use crate::cargo::Cargo;
 use crate::ladder::Ladder;
-use crate::{Error, Result};
+use crate::{Error, Result, runner};
 use serde::Deserialize;
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub const DIR: &str = "stress";
-const MANIFEST: &str = include_str!("../templates/stress/Cargo.toml");
-const MAIN: &str = include_str!("../templates/stress/main.rs");
+const MAIN: &str = include_str!("../templates/runner/stress.rs");
 /// EZCP stress tests per tier and run.
 const TESTS: usize = 50;
 
@@ -40,40 +37,11 @@ pub struct Stress {
     memory_limit_mb: u32,
 }
 
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> Error {
-    let path = path.to_owned();
-    move |source| Error::Io { path, source }
-}
-
-/// `$EZCP_PATH`, else the repository.
-fn ezcp_dependency() -> String {
-    match std::env::var("EZCP_PATH") {
-        Ok(path) if !path.is_empty() => format!("{{ path = {} }}", toml::Value::String(path)),
-        _ => r#"{ git = "https://github.com/Zorz42/EZCP" }"#.to_owned(),
-    }
-}
-
 impl Stress {
-    /// Writes the project around `generator` and builds it. The inner error holds rustc's errors.
-    pub fn build(cargo: &Cargo, dir: &Path, generator: &str, ladder: &Ladder) -> Result<std::result::Result<Self, String>> {
-        let src = dir.join("src");
-        fs::create_dir_all(&src).map_err(io(&src))?;
-        let manifest = dir.join("Cargo.toml");
-        let files = [
-            (manifest.clone(), MANIFEST.replace("{EZCP}", &ezcp_dependency())),
-            (src.join("main.rs"), MAIN.to_owned()),
-            (src.join("generator.rs"), generator.to_owned()),
-        ];
-        for (path, contents) in files {
-            fs::write(&path, contents).map_err(io(&path))?;
-        }
-
-        let compilation = cargo.build(&manifest, true)?;
-        if !compilation.success {
-            return Ok(Err(compilation.errors().map(|error| error.rendered.as_str()).collect::<Vec<_>>().join("\n")));
-        }
-        let executable = compilation.executable.ok_or_else(|| Error::Invalid("the stress project built no binary".to_owned()))?;
-        Ok(Ok(Self {
+    /// Builds the runner around `generator`. The inner error holds rustc's errors.
+    pub fn build(cargo: &Cargo, dir: &Path, generator: &Path, ladder: &Ladder) -> Result<std::result::Result<Self, String>> {
+        let main = runner::main_source(MAIN, &[("GENERATOR", generator)])?;
+        Ok(runner::build(cargo, dir, DIR, &main)?.map(|executable| Self {
             dir: dir.to_owned(),
             executable,
             tiers: ladder.rungs.len(),
@@ -138,21 +106,15 @@ impl Stress {
     }
 
     fn run(&self, official: &Path, candidates: &[&Candidate]) -> Result<Run> {
-        let output = Command::new(&self.executable)
-            .current_dir(&self.dir)
-            .args([self.tiers, TESTS, self.time_limit_ms as usize, self.memory_limit_mb as usize].map(|n| n.to_string()))
-            .arg(official)
-            .args(candidates.iter().map(|candidate| {
+        let numbers = [self.tiers, TESTS, self.time_limit_ms as usize, self.memory_limit_mb as usize].map(|n| n.to_string());
+        let args: Vec<_> = numbers
+            .into_iter()
+            .chain([official.display().to_string()])
+            .chain(candidates.iter().map(|candidate| {
                 let tiers: Vec<_> = candidate.tiers.iter().map(ToString::to_string).collect();
                 format!("{}:{}", tiers.join(","), candidate.source.display())
             }))
-            .output()
-            .map_err(io(&self.executable))?;
-        if let Ok(run) = serde_json::from_slice(&output.stdout) {
-            return Ok(run);
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let lines: Vec<_> = stderr.lines().collect();
-        Err(Error::Invalid(format!("the stress run failed: {}", lines[lines.len().saturating_sub(20)..].join("\n"))))
+            .collect();
+        runner::run(&self.executable, &self.dir, &args)
     }
 }

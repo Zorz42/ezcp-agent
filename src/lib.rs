@@ -3,10 +3,15 @@ pub mod claude;
 pub mod cpp;
 pub mod generator;
 pub mod ladder;
+pub mod limits;
+pub mod project;
+pub mod runner;
 pub mod solution;
 pub mod statement;
 pub mod stress;
 pub mod task;
+pub mod testset;
+pub mod wrong;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -23,6 +28,8 @@ pub enum Error {
     Claude(#[from] claude::Error),
     #[error(transparent)]
     Cargo(#[from] cargo::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
     #[error("{0}")]
     Invalid(String),
 }

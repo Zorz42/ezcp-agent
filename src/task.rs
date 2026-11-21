@@ -17,8 +17,7 @@ pub struct Config {
     pub subtasks: Vec<Subtask>,
     /// If non-empty, the statement uses exactly these.
     pub samples: Vec<Sample>,
-    pub partial: Partial,
-    pub limits: Limits,
+    pub tests: Tests,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,26 +49,19 @@ pub struct Sample {
     pub output: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Partial {
-    /// Wrong solutions the model adds to `ideas`; `None` lets it choose.
-    pub extra: Option<u32>,
-    pub ideas: Vec<PartialIdea>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PartialIdea {
-    pub idea: String,
-    pub passes: Option<Vec<usize>>,
+#[serde(default, deny_unknown_fields)]
+pub struct Tests {
+    /// Each test file holds the seed that rebuilds it instead of its data.
+    pub seeds: bool,
+    /// Slightly wrong solutions the tests must catch.
+    pub wrong: u32,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Limits {
-    pub time_ms: Option<u32>,
-    pub memory_mb: Option<u32>,
+impl Default for Tests {
+    fn default() -> Self {
+        Self { seeds: false, wrong: 10 }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -101,5 +93,6 @@ mod tests {
     fn starter_parses() {
         let config: super::Config = toml::from_str(super::STARTER).unwrap();
         assert_eq!(config.solution.attempts, 10);
+        assert_eq!(config.tests.wrong, 10);
     }
 }

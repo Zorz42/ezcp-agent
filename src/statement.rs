@@ -35,7 +35,6 @@ fn input(task: &Task) -> serde_json::Value {
         "subtasks": config.subtasks,
         "samples": config.samples,
         "solution_idea": config.solution.idea,
-        "limits": config.limits,
     })
 }
 

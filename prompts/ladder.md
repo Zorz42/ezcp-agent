@@ -7,6 +7,6 @@ The input holds the statement and the author's settings; any setting may be empt
 - Every rung is correct on every input within its constraints. Wrong ideas, such as a greedy that fails or an overflow, do not belong here.
 - Constraints: what a subtask would state, with round size bounds under which the rung runs well within the time limit and special cases stated exactly. The last rung's are exactly the statement's.
 - Order the rungs as the subtasks should go, from the easiest to the hardest.
-- If the author gave subtasks, align the rungs with them where they fit.
-- Points: split 100 between the rungs, growing towards the last.
+- If the author gave subtasks, the rungs are exactly those, in order, with their points: each rung the simplest correct solution of its subtask, the first a brute force only if its subtask allows one.
+- Points: the author's, else split 100 between the rungs, growing towards the last.
 - Limits: the statement's.

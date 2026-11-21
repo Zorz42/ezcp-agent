@@ -5,6 +5,7 @@
 //! solution's source, then each candidate as `<tiers it solves, comma-separated>:<source>`.
 //! Prints one [`Run`] as JSON.
 
+#[path = {GENERATOR}]
 mod generator;
 
 use ezcp::{Error, Mode, Subtask, Task};

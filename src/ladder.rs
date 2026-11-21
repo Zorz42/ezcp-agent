@@ -5,7 +5,7 @@
 //! Field docs double as instructions to the model: they end up in the JSON schema.
 
 use crate::claude::{Claude, Effort, Model, Request, Stats};
-use crate::task::Task;
+use crate::task::{self, Task};
 use crate::{Error, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,9 @@ const PROMPT: &str = include_str!("../prompts/ladder.md");
 pub struct Ladder {
     /// Whether some input has more than one correct output.
     pub multiple_answers: bool,
+    /// The statement's.
     pub time_limit_ms: u32,
+    /// The statement's.
     pub memory_limit_mb: u32,
     /// From the brute force to the intended solution, in subtask order.
     pub rungs: Vec<Rung>,
@@ -45,6 +47,9 @@ pub struct Rung {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Subtask {
+    /// Its rung.
+    #[serde(skip)]
+    pub tier: usize,
     pub points: u32,
     /// Every constraint holding in it.
     pub constraints: Vec<String>,
@@ -60,7 +65,7 @@ fn input(task: &Task, statement: &str) -> serde_json::Value {
 }
 
 impl Ladder {
-    /// One Claude call; the author's limits are enforced afterwards.
+    /// One Claude call.
     pub fn generate(claude: &Claude, task: &Task, statement: &str) -> Result<(Self, Stats)> {
         let request = Request {
             prompt: PROMPT.to_owned(),
@@ -68,11 +73,8 @@ impl Ladder {
             effort: Some(Effort::High),
             ..Default::default()
         };
-        let (mut ladder, stats): (Self, _) = claude.ask_json(&request, &input(task, statement))?;
-        let limits = &task.config.limits;
-        ladder.time_limit_ms = limits.time_ms.unwrap_or(ladder.time_limit_ms);
-        ladder.memory_limit_mb = limits.memory_mb.unwrap_or(ladder.memory_limit_mb);
-        ladder.check()?;
+        let (ladder, stats): (Self, _) = claude.ask_json(&request, &input(task, statement))?;
+        ladder.check(&task.config.subtasks)?;
         Ok((ladder, stats))
     }
 
@@ -105,17 +107,18 @@ impl Ladder {
     pub fn subtasks(&self, confirmed: &[bool]) -> Vec<Subtask> {
         let mut subtasks = Vec::new();
         let mut points = 0;
-        for (rung, &confirmed) in self.rungs.iter().zip(confirmed) {
+        for (tier, (rung, &confirmed)) in self.rungs.iter().zip(confirmed).enumerate() {
             points += rung.points;
             if confirmed {
-                subtasks.push(Subtask { points, constraints: rung.constraints.clone() });
+                subtasks.push(Subtask { tier, points, constraints: rung.constraints.clone() });
                 points = 0;
             }
         }
         subtasks
     }
 
-    fn check(&self) -> Result<()> {
+    /// The author's subtasks, if any, must be the rungs.
+    fn check(&self, author: &[task::Subtask]) -> Result<()> {
         if self.rungs.len() < 2 {
             return Err(Error::Invalid("the ladder needs a brute force and the intended solution".to_owned()));
         }
@@ -127,6 +130,9 @@ impl Ladder {
             if let Some(j) = rung.includes.iter().find(|&&j| j >= i) {
                 return Err(Error::Invalid(format!("rung `{}` includes rung {j}, which is not an earlier one", rung.name)));
             }
+        }
+        if !author.is_empty() && (author.len() != self.rungs.len() || author.iter().zip(&self.rungs).any(|(subtask, rung)| subtask.points != rung.points)) {
+            return Err(Error::Invalid("the rungs are not the author's subtasks".to_owned()));
         }
         let points: u32 = self.rungs.iter().map(|rung| rung.points).sum();
         if points != 100 {

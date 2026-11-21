@@ -1,5 +1,5 @@
 # ezcp-agent project. Only the description is required: leave any other field out to let the model decide.
-# Subtasks count from 0.
+# Subtasks count from 0. The time and memory limits are always the model's choice.
 
 # A few sentences: what is given, what is asked, rough constraints. The statement is written from this.
 description = """
@@ -21,12 +21,6 @@ attempts = 10                    # independently generated official solutions, c
 # """
 # output = "6"
 
-[partial]
-# extra = 4                      # wrong solutions the model adds to the ideas below
-# [[partial.ideas]]
-# idea = "greedy by smallest a_i"
-# passes = [0]                   # subtasks it should pass
-
-[limits]
-# time_ms = 1000
-# memory_mb = 256
+[tests]
+seeds = false                    # store each test as the seed that rebuilds it (EZCP's --seeds), not its data
+wrong = 10                       # slight mistakes per subtask the tests must catch; ~100 for serious tasks
