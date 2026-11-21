@@ -89,14 +89,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let stress = build_stress(&claude, &cargo, &work, &problem, &ladder)?;
-    println!("Cross-checking the solutions...");
-    let official = stress.check(&candidates, &mut rejected, |message| println!("  {message}"));
+    println!("Cross-checking {} solutions...", candidates.len());
+    let official = stress.check(&candidates, &mut rejected);
     for (candidate, reason) in candidates.iter().zip(&rejected) {
-        println!("  {}: {}", candidate.name, reason.as_deref().unwrap_or("ok"));
+        if let Some(reason) = reason {
+            println!("  rejected {}: {reason}", candidate.name);
+        }
     }
     let official = official?;
+    println!("{} agree", rejected.iter().filter(|reason| reason.is_none()).count());
     std::fs::copy(&candidates[official].source, work.join(solution::DIR).join(OFFICIAL_FILE))?;
-    println!("{} is the official solution.", candidates[official].name);
 
     if config.subtasks.is_empty() {
         let confirmed: Vec<_> = (0..ladder.rungs.len()).map(|tier| tier == ladder.full() || rejected[tier].is_none()).collect();

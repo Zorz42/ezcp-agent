@@ -81,7 +81,7 @@ impl Stress {
     /// solution: the first full one left. A time-out, memory overrun or crash rejects a candidate; a
     /// wrong answer is a vote against the official solution, which is rejected instead when outvoted.
     /// `rejected` holds each candidate's reason, `None` while it is left. Returns the official solution.
-    pub fn check(&self, candidates: &[Candidate], rejected: &mut [Option<String>], mut log: impl FnMut(String)) -> Result<usize> {
+    pub fn check(&self, candidates: &[Candidate], rejected: &mut [Option<String>]) -> Result<usize> {
         loop {
             let left: Vec<_> = (0..candidates.len()).filter(|&i| rejected[i].is_none()).collect();
             let official = *left
@@ -89,7 +89,6 @@ impl Stress {
                 .find(|&&i| candidates[i].tiers.len() == self.tiers)
                 .ok_or_else(|| Error::Invalid("no full solution is left".to_owned()))?;
             let others: Vec<_> = left.into_iter().filter(|&i| i != official).collect();
-            log(format!("{} against {} others", candidates[official].name, others.len()));
             if self.vote(candidates, official, others, rejected)? {
                 return Ok(official);
             }
