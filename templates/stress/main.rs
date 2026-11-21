@@ -3,19 +3,31 @@
 //!
 //! Arguments: tiers, stress tests per tier, time limit in ms, memory limit in MB, the official
 //! solution's source, then each candidate as `<tiers it solves, comma-separated>:<source>`.
-//! Prints one line: `passed`, `candidate <index> <verdict> <tier>`, `official <verdict>` or `error <message>`.
+//! Prints one [`Run`] as JSON.
 
 mod generator;
 
 use ezcp::{Error, Mode, Subtask, Task};
+use serde::Serialize;
 use std::path::Path;
 use std::{env, fs};
 
-fn main() {
-    println!("{}", run().unwrap_or_else(|message| format!("error {message}")));
+/// Tiers and candidates are counted from 0.
+#[derive(Serialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+enum Run {
+    Passed,
+    CandidateFailed { candidate: usize, verdict: String, tier: usize },
+    OfficialFailed { verdict: String },
+    Error { message: String },
 }
 
-fn run() -> Result<String, String> {
+fn main() {
+    let run = run().unwrap_or_else(|message| Run::Error { message });
+    println!("{}", serde_json::to_string(&run).expect("a run serializes"));
+}
+
+fn run() -> Result<Run, String> {
     let args: Vec<String> = env::args().skip(1).collect();
     let [tiers, tests, time_ms, memory_mb, official, candidates @ ..] = args.as_slice() else {
         return Err("expected: tiers tests time_ms memory_mb official tiers:candidate...".to_owned());
@@ -44,14 +56,15 @@ fn run() -> Result<String, String> {
         task = task.with_partial_solution(&i.to_string(), &read(source)?, &passes);
     }
 
+    let official = |verdict: &str| Run::OfficialFailed { verdict: verdict.to_owned() };
     Ok(match task.run_mode(Mode::Files) {
-        Ok(()) => "passed".to_owned(),
+        Ok(()) => Run::Passed,
         Err(Error::PartialSolutionFailsSubtask { partial_number, verdict, subtask_number, .. }) => {
-            format!("candidate {} {verdict} {}", partial_number - 1, subtask_number - 1)
+            Run::CandidateFailed { candidate: partial_number - 1, verdict, tier: subtask_number - 1 }
         }
-        Err(Error::SolutionTimedOut { .. }) => "official TLE".to_owned(),
-        Err(Error::SolutionOutOfMemory { .. }) => "official MLE".to_owned(),
-        Err(Error::SolutionCrash { .. }) => "official RTE".to_owned(),
+        Err(Error::SolutionTimedOut { .. }) => official("TLE"),
+        Err(Error::SolutionOutOfMemory { .. }) => official("MLE"),
+        Err(Error::SolutionCrash { .. }) => official("RTE"),
         Err(err) => return Err(err.to_string()),
     })
 }

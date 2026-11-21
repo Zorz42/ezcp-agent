@@ -4,6 +4,7 @@
 use crate::cargo::Cargo;
 use crate::ladder::Ladder;
 use crate::{Error, Result};
+use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,10 +22,14 @@ pub struct Candidate {
     pub tiers: Vec<usize>,
 }
 
+/// The runner's output; tiers and candidates are counted from 0.
+#[derive(Deserialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
 enum Run {
     Passed,
-    CandidateFailed { index: usize, verdict: String, tier: usize },
-    OfficialFailed(String),
+    CandidateFailed { candidate: usize, verdict: String, tier: usize },
+    OfficialFailed { verdict: String },
+    Error { message: String },
 }
 
 pub struct Stress {
@@ -102,11 +107,11 @@ impl Stress {
             let left: Vec<_> = others.iter().map(|&i| &candidates[i]).collect();
             match self.run(&candidates[official].source, &left)? {
                 Run::Passed => break,
-                Run::CandidateFailed { index, verdict, tier } => {
-                    if index >= others.len() {
-                        return Err(Error::Invalid(format!("the stress run reported candidate {index} of {}", others.len())));
+                Run::CandidateFailed { candidate, verdict, tier } => {
+                    if candidate >= others.len() {
+                        return Err(Error::Invalid(format!("the stress run reported candidate {candidate} of {}", others.len())));
                     }
-                    let i = others.remove(index);
+                    let i = others.remove(candidate);
                     let reason = format!("{verdict} on tier {}", tier + 1);
                     if verdict == "WA" {
                         wrong.push((i, reason));
@@ -114,10 +119,11 @@ impl Stress {
                         rejected[i] = Some(reason);
                     }
                 }
-                Run::OfficialFailed(verdict) => {
+                Run::OfficialFailed { verdict } => {
                     rejected[official] = Some(format!("{verdict} as the official solution"));
                     return Ok(false);
                 }
+                Run::Error { message } => return Err(Error::Invalid(format!("the stress run failed: {message}"))),
             }
         }
         // The official solution is on the side of those left, and wins ties.
@@ -142,26 +148,11 @@ impl Stress {
             }))
             .output()
             .map_err(io(&self.executable))?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let line = stdout.trim();
-        match line.split(' ').collect::<Vec<_>>().as_slice() {
-            ["passed"] => return Ok(Run::Passed),
-            ["official", verdict] => return Ok(Run::OfficialFailed((*verdict).to_owned())),
-            ["candidate", index, verdict, tier] => {
-                if let (Ok(index), Ok(tier)) = (index.parse(), tier.parse()) {
-                    return Ok(Run::CandidateFailed { index, verdict: (*verdict).to_owned(), tier });
-                }
-            }
-            _ => {}
+        if let Ok(run) = serde_json::from_slice(&output.stdout) {
+            return Ok(run);
         }
-        let message = line.strip_prefix("error ").map_or_else(
-            || {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let lines: Vec<_> = stderr.lines().collect();
-                lines[lines.len().saturating_sub(20)..].join("\n")
-            },
-            ToOwned::to_owned,
-        );
-        Err(Error::Invalid(format!("the stress run failed: {message}")))
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let lines: Vec<_> = stderr.lines().collect();
+        Err(Error::Invalid(format!("the stress run failed: {}", lines[lines.len().saturating_sub(20)..].join("\n"))))
     }
 }
