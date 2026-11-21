@@ -34,13 +34,9 @@ pub struct Limits {
 
 /// Two parallel calls.
 pub fn generate(claude: &Claude, statement: &str, official: &str, ladder: &Ladder, subtasks: &[Subtask]) -> Result<(Limits, Vec<Stats>)> {
-    let request = |prompt: &str| Request {
-        prompt: prompt.to_owned(),
-        model: Some(Model::Opus),
-        effort: Some(Effort::High),
-        ..Default::default()
-    };
-    let (unoptimized_request, micro_request) = (request(UNOPTIMIZED_PROMPT), request(MICRO_PROMPT));
+    let request = |prompt: &str, model, effort| Request { prompt: prompt.to_owned(), model: Some(model), effort: Some(effort), ..Default::default() };
+    // The plain one rewrites the official solution; the micro-optimized one needs the judgement.
+    let (unoptimized_request, micro_request) = (request(UNOPTIMIZED_PROMPT, Model::Sonnet, Effort::Medium), request(MICRO_PROMPT, Model::Opus, Effort::High));
     let unoptimized_input = serde_json::json!({ "statement": statement, "official_solution": official });
     let slower: Vec<_> = ladder.rungs[..ladder.full()].iter().map(|rung| serde_json::json!({ "approach": rung.approach, "complexity": rung.complexity })).collect();
     let micro_input = serde_json::json!({ "statement": statement, "official_solution": official, "subtasks": subtasks, "slower_approaches": slower });

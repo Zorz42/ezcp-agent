@@ -39,7 +39,7 @@ pub fn compile<T>(
         Language::Cpp => (PROMPT.to_owned(), "C++17"),
         Language::Rust => (format!("{PROMPT}{EZCP}"), "Rust"),
     };
-    let request = Request { prompt: "Fix the compile errors.".to_owned(), system: Some(system), model: Some(Model::Sonnet), effort: Some(Effort::Medium) };
+    let request = Request { prompt: "Fix the compile errors.".to_owned(), system: Some(system), model: Some(Model::Sonnet), effort: Some(Effort::Low) };
     let others: serde_json::Map<_, _> = others.iter().map(|(name, source)| ((*name).to_owned(), (*source).into())).collect();
     let mut stats = Vec::new();
     for _ in 0..TRIES {

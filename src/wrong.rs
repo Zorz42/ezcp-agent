@@ -39,7 +39,7 @@ pub struct Base<'a> {
 
 /// `count` per base: sequential calls of up to [`BATCH`] for each, the bases in parallel.
 pub fn mutants(claude: &Claude, statement: &str, subtasks: &[Subtask], bases: &[Base], count: u32) -> Result<(Vec<Vec<Wrong>>, Vec<Stats>)> {
-    let request = &opus(PROMPT);
+    let request = &request(PROMPT, Model::Sonnet, Effort::Medium);
     let results: Vec<_> = std::thread::scope(|scope| {
         let handles: Vec<_> = bases.iter().map(|base| scope.spawn(move || mutants_of(claude, request, statement, subtasks, base, count))).collect();
         handles.into_iter().map(|handle| handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))).collect::<Result<_>>()
@@ -95,11 +95,13 @@ struct Source {
     source: String,
 }
 
-fn opus(prompt: &str) -> Request {
+/// Listing the wrong approaches takes Opus; making mistakes in a given source or writing a given
+/// approach does not.
+fn request(prompt: &str, model: Model, effort: Effort) -> Request {
     Request {
         prompt: prompt.to_owned(),
-        model: Some(Model::Opus),
-        effort: Some(Effort::High),
+        model: Some(model),
+        effort: Some(effort),
         ..Default::default()
     }
 }
@@ -113,13 +115,13 @@ pub fn approaches(claude: &Claude, statement: &str, official: &str, ladder: &Lad
         "subtasks": subtasks,
         "correct_approaches": correct,
     });
-    let (output, stats): (Approaches, _) = claude.ask_json(&opus(APPROACHES_PROMPT), &input)?;
+    let (output, stats): (Approaches, _) = claude.ask_json(&request(APPROACHES_PROMPT, Model::Opus, Effort::High), &input)?;
     Ok((output.approaches, stats))
 }
 
 /// One source per approach, from parallel calls.
 pub fn write(claude: &Claude, statement: &str, subtasks: &[Subtask], approaches: &[Approach]) -> Result<(Vec<String>, Vec<Stats>)> {
-    let request = &opus(APPROACH_PROMPT);
+    let request = &request(APPROACH_PROMPT, Model::Sonnet, Effort::Medium);
     let inputs: Vec<_> = approaches
         .iter()
         .map(|approach| {
