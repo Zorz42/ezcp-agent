@@ -1,15 +1,16 @@
-//! Independently generated official C++ solutions, written to `solutions/official/`.
+//! C++ solutions written from the statement: independent attempts at the full task, and the ladder's
+//! slower rungs.
 
 use crate::claude::{Claude, Effort, Model, Request, Stats};
-use crate::spec::Spec;
+use crate::ladder::Ladder;
 use crate::{Error, Result};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 
-pub const DIR: &str = "solutions/official";
+pub const DIR: &str = "solutions";
 const PROMPT: &str = include_str!("../prompts/solution.md");
 
 #[derive(Deserialize, JsonSchema)]
@@ -18,55 +19,69 @@ struct Output {
     source: String,
 }
 
-fn input(spec: &Spec, attempt: u32) -> serde_json::Value {
-    serde_json::json!({
-        // Only makes the requests, and so their cache entries, distinct.
-        "attempt": attempt,
-        "title": spec.title,
-        "summary": spec.summary,
-        "input_format": spec.input_format,
-        "output_format": spec.output_format,
-        "multiple_answers": spec.multiple_answers,
-        "time_limit_ms": spec.time_limit_ms,
-        "memory_limit_mb": spec.memory_limit_mb,
-        "solution": spec.solution,
-        "edge_cases": spec.edge_cases,
-        "subtasks": spec.subtasks,
-    })
+pub struct Solutions {
+    /// Independent attempts at the full task.
+    pub attempts: Vec<String>,
+    /// One per rung below the intended one, in ladder order.
+    pub rungs: Vec<String>,
 }
 
-/// `count` solutions from parallel calls; fails if any call does, but finished ones stay cached.
-pub fn generate(claude: &Claude, spec: &Spec, count: u32) -> Result<Vec<(String, Stats)>> {
+/// `attempts` full solutions and the lower rungs, from parallel calls. Fails if any call does, but
+/// finished ones stay cached.
+pub fn generate(claude: &Claude, statement: &str, idea: Option<&str>, ladder: &Ladder, attempts: u32) -> Result<(Solutions, Vec<Stats>)> {
     let request = &Request {
         prompt: PROMPT.to_owned(),
         model: Some(Model::Opus),
         effort: Some(Effort::High),
         ..Default::default()
     };
-    thread::scope(|scope| {
-        let handles: Vec<_> = (1..=count)
-            .map(|attempt| scope.spawn(move || claude.ask_json::<Output>(request, &input(spec, attempt))))
-            .collect();
+    let inputs: Vec<_> = (1..=attempts)
+        // `attempt` only makes the requests, and so their cache entries, distinct.
+        .map(|attempt| serde_json::json!({ "statement": statement, "idea": idea, "attempt": attempt }))
+        .chain(ladder.rungs[..ladder.full()].iter().map(|rung| {
+            serde_json::json!({ "statement": statement, "approach": rung.approach, "constraints": rung.constraints })
+        }))
+        .collect();
+
+    let results: Vec<(String, Stats)> = thread::scope(|scope| {
+        let handles: Vec<_> = inputs.iter().map(|input| scope.spawn(move || claude.ask_json::<Output>(request, input))).collect();
         handles
             .into_iter()
             .map(|handle| {
                 let (output, stats) = handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))?;
                 Ok((output.source, stats))
             })
-            .collect()
-    })
+            .collect::<Result<_>>()
+    })?;
+    let (mut sources, stats): (Vec<_>, Vec<_>) = results.into_iter().unzip();
+    let rungs = sources.split_off(attempts as usize);
+    Ok((Solutions { attempts: sources, rungs }, stats))
 }
 
-/// Replaces the contents of `dir` with `1.cpp`, `2.cpp`, ...
-pub fn save(dir: &Path, sources: &[String]) -> Result<()> {
-    let io = |source| Error::Io { path: dir.to_owned(), source };
-    if dir.exists() {
-        fs::remove_dir_all(dir).map_err(io)?;
+impl Solutions {
+    /// Replaces `dir` with `attempts/1.cpp, ...` and `ladder/1.cpp, ...`, returning their paths in
+    /// that order.
+    pub fn save(&self, dir: &Path) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+        let io = |path: &Path| {
+            let path = path.to_owned();
+            move |source| Error::Io { path, source }
+        };
+        if dir.exists() {
+            fs::remove_dir_all(dir).map_err(io(dir))?;
+        }
+        let write = |subdir: &str, sources: &[String]| {
+            let subdir = dir.join(subdir);
+            fs::create_dir_all(&subdir).map_err(io(&subdir))?;
+            sources
+                .iter()
+                .enumerate()
+                .map(|(i, source)| {
+                    let path = subdir.join(format!("{}.cpp", i + 1));
+                    fs::write(&path, source).map_err(io(&path))?;
+                    Ok(path)
+                })
+                .collect::<Result<Vec<_>>>()
+        };
+        Ok((write("attempts", &self.attempts)?, write("ladder", &self.rungs)?))
     }
-    fs::create_dir_all(dir).map_err(io)?;
-    for (i, source) in sources.iter().enumerate() {
-        let path = dir.join(format!("{}.cpp", i + 1));
-        fs::write(&path, source).map_err(|source| Error::Io { path, source })?;
-    }
-    Ok(())
 }

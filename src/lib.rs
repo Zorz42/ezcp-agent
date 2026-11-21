@@ -1,8 +1,12 @@
 pub mod cargo;
 pub mod claude;
+pub mod cpp;
+pub mod generator;
+pub mod ladder;
 pub mod solution;
 pub mod spec;
 pub mod statement;
+pub mod stress;
 pub mod task;
 
 use std::io;
@@ -26,6 +30,6 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-fn read(path: &Path) -> Result<String> {
+pub fn read(path: &Path) -> Result<String> {
     std::fs::read_to_string(path).map_err(|source| Error::Io { path: path.to_owned(), source })
 }
