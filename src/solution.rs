@@ -29,19 +29,22 @@ pub struct Solutions {
 /// `attempts` full solutions and the lower rungs, from parallel calls. Fails if any call does, but
 /// finished ones stay cached.
 pub fn generate(claude: &Claude, statement: &str, idea: Option<&str>, ladder: &Ladder, attempts: u32) -> Result<(Solutions, Vec<Stats>)> {
-    // A rung's approach is given: implementing it needs less than solving the task.
-    let request = |model| Request { prompt: PROMPT.to_owned(), model: Some(model), effort: Some(Effort::High), ..Default::default() };
-    let (attempt, rung) = (&request(Model::Opus), &request(Model::Sonnet));
+    let request = &Request {
+        prompt: PROMPT.to_owned(),
+        model: Some(Model::Opus),
+        effort: Some(Effort::High),
+        ..Default::default()
+    };
     let inputs: Vec<_> = (1..=attempts)
         // `attempt` only makes the requests, and so their cache entries, distinct.
-        .map(|number| (attempt, serde_json::json!({ "statement": statement, "idea": idea, "attempt": number })))
-        .chain(ladder.rungs[..ladder.full()].iter().map(|step| {
-            (rung, serde_json::json!({ "statement": statement, "approach": step.approach, "constraints": step.constraints }))
+        .map(|attempt| serde_json::json!({ "statement": statement, "idea": idea, "attempt": attempt }))
+        .chain(ladder.rungs[..ladder.full()].iter().map(|rung| {
+            serde_json::json!({ "statement": statement, "approach": rung.approach, "constraints": rung.constraints })
         }))
         .collect();
 
     let results: Vec<(String, Stats)> = thread::scope(|scope| {
-        let handles: Vec<_> = inputs.iter().map(|input| scope.spawn(move || claude.ask_json::<Output>(input.0, &input.1))).collect();
+        let handles: Vec<_> = inputs.iter().map(|input| scope.spawn(move || claude.ask_json::<Output>(request, input))).collect();
         handles
             .into_iter()
             .map(|handle| {
